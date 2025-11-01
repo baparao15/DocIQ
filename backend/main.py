@@ -28,9 +28,23 @@ from summary_engine import SummaryEngine
 
 app = FastAPI(title="Legal Document Demystifier API")
 
+# ✅ CORS Settings
+origins = [
+    "http://localhost:3000",  # React default
+    "http://localhost:5000",  # Vite default
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5000",
+
+    # ✅ Add your Vercel production domain here:
+    "https://your-vercel-project-name.vercel.app",
+
+    os.getenv("FRONTEND_URL")
+]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o for o in origins if o],  # ignore None
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +59,9 @@ summary_engine = SummaryEngine()
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+
+# -------------------- MODELS --------------------
 
 class SignupRequest(BaseModel):
     email: EmailStr
@@ -63,6 +80,9 @@ class TokenResponse(BaseModel):
 class DocumentUpdateRequest(BaseModel):
     edited_text: str
 
+
+# -------------------- ROUTES --------------------
+
 @app.get("/")
 async def root():
     return {"message": "Legal Document Demystifier API", "status": "running"}
@@ -80,10 +100,7 @@ async def health():
 async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
     
     user = User(
         email=request.email,
@@ -99,47 +116,24 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name
-        }
-    }
+    return {"access_token": access_token, "token_type": "bearer", "user": {"id": user.id, "email": user.email, "full_name": user.full_name}}
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == request.email).first()
     if not user or not verify_password(request.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
     
     access_token = create_access_token(
         data={"sub": user.email},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "full_name": user.full_name
-        }
-    }
+    return {"access_token": access_token, "token_type": "bearer", "user": {"id": user.id, "email": user.email, "full_name": user.full_name}}
 
 @app.get("/api/auth/me")
 async def get_me(current_user: User = Depends(get_current_active_user)):
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "full_name": current_user.full_name
-    }
+    return {"id": current_user.id, "email": current_user.email, "full_name": current_user.full_name}
 
 @app.post("/api/analyze-document")
 async def analyze_document(
@@ -155,14 +149,11 @@ async def analyze_document(
             f.write(content)
         
         text = document_processor.extract_text(str(file_path))
-        
-        if file_path.exists():
-            os.remove(file_path)
+        if file_path.exists(): os.remove(file_path)
         
         risks = risk_analyzer.analyze(text)
-        
         summary = await summary_engine.generate_summary(text)
-        
+
         rewrites = None
         if risks:
             try:
@@ -173,37 +164,17 @@ async def analyze_document(
                             risk["suggested_rewrite"] = rewrites[i]
             except Exception as e:
                 print(f"Rewrite error: {e}")
+
+        document = Document(user_id=current_user.id, filename=file.filename, original_text=text)
+        db.add(document); db.commit(); db.refresh(document)
         
-        document = Document(
-            user_id=current_user.id,
-            filename=file.filename,
-            original_text=text
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
+        analysis = Analysis(document_id=document.id, summary=summary, risks=risks, rewrites=rewrites)
+        db.add(analysis); db.commit(); db.refresh(analysis)
         
-        analysis = Analysis(
-            document_id=document.id,
-            summary=summary,
-            risks=risks,
-            rewrites=rewrites
-        )
-        db.add(analysis)
-        db.commit()
-        db.refresh(analysis)
-        
-        return {
-            "analysis_id": analysis.id,
-            "document_name": file.filename,
-            "text_length": len(text),
-            "risks_found": len(risks),
-            "risks": risks
-        }
+        return {"analysis_id": analysis.id, "document_name": file.filename, "text_length": len(text), "risks_found": len(risks), "risks": risks}
     
     except Exception as e:
-        if file_path and file_path.exists():
-            os.remove(file_path)
+        if file_path and file_path.exists(): os.remove(file_path)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyze-text")
@@ -214,9 +185,8 @@ async def analyze_text(
 ):
     try:
         risks = risk_analyzer.analyze(text)
-        
         summary = await summary_engine.generate_summary(text)
-        
+
         rewrites = None
         if risks:
             try:
@@ -227,70 +197,29 @@ async def analyze_text(
                             risk["suggested_rewrite"] = rewrites[i]
             except Exception as e:
                 print(f"Rewrite error: {e}")
+
+        document = Document(user_id=current_user.id, filename="Text Input", original_text=text)
+        db.add(document); db.commit(); db.refresh(document)
         
-        document = Document(
-            user_id=current_user.id,
-            filename="Text Input",
-            original_text=text
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
+        analysis = Analysis(document_id=document.id, summary=summary, risks=risks, rewrites=rewrites)
+        db.add(analysis); db.commit(); db.refresh(analysis)
         
-        analysis = Analysis(
-            document_id=document.id,
-            summary=summary,
-            risks=risks,
-            rewrites=rewrites
-        )
-        db.add(analysis)
-        db.commit()
-        db.refresh(analysis)
-        
-        return {
-            "analysis_id": analysis.id,
-            "document_name": "Text Input",
-            "text_length": len(text),
-            "risks_found": len(risks),
-            "risks": risks
-        }
+        return {"analysis_id": analysis.id, "document_name": "Text Input", "text_length": len(text), "risks_found": len(risks), "risks": risks}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/documents")
-async def get_documents(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    documents = db.query(Document).filter(
-        Document.user_id == current_user.id
-    ).order_by(Document.created_at.desc()).all()
-    
-    return [{
-        "id": doc.id,
-        "filename": doc.filename,
-        "created_at": doc.created_at.isoformat(),
-        "updated_at": doc.updated_at.isoformat()
-    } for doc in documents]
+async def get_documents(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    documents = db.query(Document).filter(Document.user_id == current_user.id).order_by(Document.created_at.desc()).all()
+    return [{"id": doc.id, "filename": doc.filename, "created_at": doc.created_at.isoformat(), "updated_at": doc.updated_at.isoformat()} for doc in documents]
 
 @app.get("/api/documents/{document_id}")
-async def get_document(
-    document_id: int,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
+async def get_document(document_id: int, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    document = db.query(Document).filter(Document.id == document_id, Document.user_id == current_user.id).first()
+    if not document: raise HTTPException(status_code=404, detail="Document not found")
     
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    analysis = db.query(Analysis).filter(
-        Analysis.document_id == document_id
-    ).first()
+    analysis = db.query(Analysis).filter(Analysis.document_id == document_id).first()
     
     return {
         "id": document.id,
@@ -304,23 +233,12 @@ async def get_document(
     }
 
 @app.put("/api/documents/{document_id}")
-async def update_document(
-    document_id: int,
-    request: DocumentUpdateRequest,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+async def update_document(document_id: int, request: DocumentUpdateRequest, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    document = db.query(Document).filter(Document.id == document_id, Document.user_id == current_user.id).first()
+    if not document: raise HTTPException(status_code=404, detail="Document not found")
     
     document.edited_text = request.edited_text
     db.commit()
-    
     return {"success": True, "message": "Document updated successfully"}
 
 if __name__ == "__main__":
