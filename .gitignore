@@ -33,11 +33,10 @@ ENV/
 env.bak/
 venv.bak/
 
-*.db
 *.sqlite
 *.sqlite3
 chroma_db/
-uploads/
+
 
 .DS_Store
 .idea/
