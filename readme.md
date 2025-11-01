@@ -251,4 +251,6 @@ The system is optimized to minimize OpenAI API costs:
 - Implement caching for similar clauses to reduce API costs
 - ChromaDB integration for semantic search (currently installed but not used)
 #   C l a u s e S e n s e  
+ #   D o c I Q  
+ #   D o c I Q  
  

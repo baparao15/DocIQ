@@ -2,7 +2,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
 develop-eggs/
 dist/
@@ -33,9 +32,7 @@ ENV/
 env.bak/
 venv.bak/
 
-*.sqlite
-*.sqlite3
-chroma_db/
+
 
 
 .DS_Store
@@ -54,3 +51,6 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Database files
+*.db
